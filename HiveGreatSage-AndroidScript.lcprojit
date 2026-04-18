@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lcprojit projname="HiveGreatSage-AndroidScript" lcprojversion="150" is_acc_mode="0" appname="HiveGreatSage-AndroidScript" pkgname="com.HiveGreatSage.AndroidScript">
+    <lua entry="HiveGreatSage-AndroidScript.lua"/>
+    <ui entry="HiveGreatSage-AndroidScript.ui"/>
+    <rc entry="HiveGreatSage-AndroidScript.rc"/>
+    <luaej/>
+</lcprojit>

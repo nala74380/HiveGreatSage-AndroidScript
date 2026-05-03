@@ -3,8 +3,9 @@
 名称: 热更新模块
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-04-28
-版本: V1.0.2
+版本: V1.0.3
 改进内容:
+  V1.0.3 - 开发期清理旧字段兼容；只接受 Verify 当前 current_version/release_notes 字段契约
   V1.0.2 - 兼容 Verify current_version/release_notes 字段；版本号改由新包启动后写入；补强强制更新失败阻断
   V1.0.1 - 修正 httpGet 参数和 downloadFile 调用
   V1.0.0 - 初始版本
@@ -28,7 +29,7 @@ local function _local_version()
     local saved = readKeyVal(KEY_VERSION)
 
     -- 以当前脚本包内的 Config.SCRIPT_VERSION 作为本地版本真相源。
-    -- 这样 installLrPkg 失败时，不会因为旧逻辑提前写入新版本导致误判已更新。
+    -- 安装失败时，不允许提前写入服务端版本，避免误判已更新。
     if not saved or saved == "" or saved ~= code_version then
         writeKeyVal(KEY_VERSION, code_version)
         return code_version
@@ -49,27 +50,21 @@ local function _get_auth(path)
     return ret
 end
 
-local function _server_version(check, fallback)
-    if type(check) ~= "table" then
-        return fallback
+local function _server_version(check)
+    if type(check) ~= "table" or not check.current_version or tostring(check.current_version) == "" then
+        return nil
     end
 
     -- Verify 当前 UpdateCheckResponse 使用 current_version 表示服务端 active 版本。
-    -- 保留 server_version/version/latest_version 兼容，是为了降低旧包过渡风险。
-    return tostring(
-        check.current_version
-        or check.server_version
-        or check.version
-        or check.latest_version
-        or fallback
-    )
+    -- 开发期不保留 latest_version / server_version / version 等旧检查响应字段兼容。
+    return tostring(check.current_version)
 end
 
 local function _release_notes(check)
-    if type(check) ~= "table" then
+    if type(check) ~= "table" or not check.release_notes then
         return ""
     end
-    return tostring(check.release_notes or check.update_message or "")
+    return tostring(check.release_notes)
 end
 
 local function _fail_or_block(check, message)
@@ -107,7 +102,12 @@ function Updater.check_and_update()
         return
     end
 
-    local target_version = _server_version(check, current)
+    local target_version = _server_version(check)
+    if not target_version then
+        _fail_or_block(check, "版本响应缺少 current_version")
+        return
+    end
+
     local notes = _release_notes(check)
 
     Logger.info(string.format("[Updater] 发现新版本 %s", target_version))
@@ -127,6 +127,7 @@ function Updater.check_and_update()
         return
     end
 
+    -- /api/update/download 的 version 是下载包版本字段，属于当前契约。
     if dl.version and tostring(dl.version) ~= "" then
         target_version = tostring(dl.version)
     end
@@ -142,7 +143,7 @@ function Updater.check_and_update()
     end
 
     if check.checksum_sha256 or dl.checksum_sha256 then
-        Logger.warning("[Updater] 已收到 checksum_sha256，但当前懒人精灵环境尚未接入 SHA-256 校验，待补强")
+        Logger.warning("[Updater] 已收到 checksum_sha256，但当前懒人精灵环境尚未接入 SHA-256 文件校验，待补强")
     end
 
     -- 不在安装前写 KEY_VERSION。

@@ -3,10 +3,11 @@
 名称: 热更新模块
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-04-28
-版本: V1.0.3
+版本: V1.0.4
 改进内容:
+  V1.0.4 - 删除旧检查响应字段名残留注释，便于全仓搜索验证
   V1.0.3 - 开发期清理旧字段兼容；只接受 Verify 当前 current_version/release_notes 字段契约
-  V1.0.2 - 兼容 Verify current_version/release_notes 字段；版本号改由新包启动后写入；补强强制更新失败阻断
+  V1.0.2 - 版本号改由新包启动后写入；补强强制更新失败阻断
   V1.0.1 - 修正 httpGet 参数和 downloadFile 调用
   V1.0.0 - 初始版本
   ⚠️ installLrPkg（小写r），不是 installLRPkg
@@ -56,7 +57,7 @@ local function _server_version(check)
     end
 
     -- Verify 当前 UpdateCheckResponse 使用 current_version 表示服务端 active 版本。
-    -- 开发期不保留 latest_version / server_version / version 等旧检查响应字段兼容。
+    -- 开发期不保留任何旧检查响应字段兼容。
     return tostring(check.current_version)
 end
 

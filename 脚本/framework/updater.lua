@@ -1,10 +1,11 @@
 --[[
 文件位置: 脚本/framework/updater.lua
 名称: 热更新模块
-作者: 蜂巢·大圣 (Hive-GreatSage)
+作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-04-28
-版本: V1.0.1
+版本: V1.0.2
 改进内容:
+  V1.0.2 - 兼容 Verify current_version/release_notes 字段；版本号改由新包启动后写入；补强强制更新失败阻断
   V1.0.1 - 修正 httpGet 参数和 downloadFile 调用
   V1.0.0 - 初始版本
   ⚠️ installLrPkg（小写r），不是 installLRPkg
@@ -18,13 +19,22 @@ local Updater = {}
 
 local KEY_VERSION = "hive_script_version"
 
+local function _config_version()
+    return tostring(Config.SCRIPT_VERSION or "1.0.0")
+end
+
 local function _local_version()
-    local v = readKeyVal(KEY_VERSION)
-    if not v or v == "" then
-        writeKeyVal(KEY_VERSION, Config.SCRIPT_VERSION or "1.0.0")
-        return Config.SCRIPT_VERSION or "1.0.0"
+    local code_version = _config_version()
+    local saved = readKeyVal(KEY_VERSION)
+
+    -- 以当前脚本包内的 Config.SCRIPT_VERSION 作为本地版本真相源。
+    -- 这样 installLrPkg 失败时，不会因为旧逻辑提前写入新版本导致误判已更新。
+    if not saved or saved == "" or saved ~= code_version then
+        writeKeyVal(KEY_VERSION, code_version)
+        return code_version
     end
-    return v
+
+    return saved
 end
 
 -- httpGet(url, timeout, header) → ret, code
@@ -37,6 +47,41 @@ local function _get_auth(path)
         return nil
     end
     return ret
+end
+
+local function _server_version(check, fallback)
+    if type(check) ~= "table" then
+        return fallback
+    end
+
+    -- Verify 当前 UpdateCheckResponse 使用 current_version 表示服务端 active 版本。
+    -- 保留 server_version/version/latest_version 兼容，是为了降低旧包过渡风险。
+    return tostring(
+        check.current_version
+        or check.server_version
+        or check.version
+        or check.latest_version
+        or fallback
+    )
+end
+
+local function _release_notes(check)
+    if type(check) ~= "table" then
+        return ""
+    end
+    return tostring(check.release_notes or check.update_message or "")
+end
+
+local function _fail_or_block(check, message)
+    Logger.error("[Updater] " .. message)
+    if type(check) == "table" and check.force_update then
+        toast("强制更新失败，请检查网络或联系管理员")
+        exitScript()
+    end
+end
+
+local function _safe_version_text(version)
+    return tostring(version or "unknown"):gsub("[^%w%.%-_]", "_")
 end
 
 function Updater.check_and_update()
@@ -62,40 +107,55 @@ function Updater.check_and_update()
         return
     end
 
-    Logger.info(string.format("[Updater] 发现新版本 %s", check.latest_version or "?"))
-    if check.update_message and check.update_message ~= "" then
-        toast(check.update_message)
+    local target_version = _server_version(check, current)
+    local notes = _release_notes(check)
+
+    Logger.info(string.format("[Updater] 发现新版本 %s", target_version))
+    if notes ~= "" then
+        toast(notes)
     end
 
     local dl_resp = _get_auth("/api/update/download?client_type=android")
     if not dl_resp then
-        Logger.error("[Updater] 获取下载链接失败")
-        if check.force_update then
-            toast("强制更新失败，请检查网络")
-            exitScript()
-        end
+        _fail_or_block(check, "获取下载链接失败")
         return
     end
 
     local ok2, dl = pcall(jsonLib.decode, dl_resp)
-    if not ok2 or not dl.download_url then
-        Logger.error("[Updater] 下载链接解析失败")
+    if not ok2 or type(dl) ~= "table" or not dl.download_url then
+        _fail_or_block(check, "下载链接解析失败")
         return
     end
 
-    local save_path = getWorkPath() .. "update.lrj"
+    if dl.version and tostring(dl.version) ~= "" then
+        target_version = tostring(dl.version)
+    end
+
+    local save_path = getWorkPath() .. "update_" .. _safe_version_text(target_version) .. ".lrj"
     Logger.info("[Updater] 开始下载...")
+
     -- downloadFile(url, savepath) → 失败返回-1，成功返回0
     local dl_ret = downloadFile(dl.download_url, save_path)
     if dl_ret ~= 0 then
-        Logger.error("[Updater] 下载失败: " .. tostring(dl_ret))
+        _fail_or_block(check, "下载失败: " .. tostring(dl_ret))
         return
     end
 
-    writeKeyVal(KEY_VERSION, check.latest_version or current)
+    if check.checksum_sha256 or dl.checksum_sha256 then
+        Logger.warning("[Updater] 已收到 checksum_sha256，但当前懒人精灵环境尚未接入 SHA-256 校验，待补强")
+    end
+
+    -- 不在安装前写 KEY_VERSION。
+    -- 新包启动后 _local_version() 会以新包 Config.SCRIPT_VERSION 写入 hive_script_version。
     Logger.info("[Updater] 安装新版本，即将重启...")
-    toast("更新至 " .. (check.latest_version or "新版本") .. "，重启中...")
-    installLrPkg(save_path)   -- ⚠️ 小写r
+    toast("更新至 " .. target_version .. "，重启中...")
+
+    local ok_install, install_ret = pcall(installLrPkg, save_path)   -- ⚠️ 小写r
+    if not ok_install or install_ret == false or install_ret == -1 then
+        _fail_or_block(check, "安装更新包失败: " .. tostring(install_ret))
+        return
+    end
+
     restartScript()
 end
 

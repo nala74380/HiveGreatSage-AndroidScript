@@ -31,7 +31,7 @@ Config.API_BASE_URL  = ""    -- 空字符串表示优先从 UI 输入/KV 存储�
 Config.PROJECT_UUID  = "07238db5-129a-4408-b82a-e025be4652a1"  -- 与 PC中控共用同一游戏项目 UUID
 
 -- ===== TomatoOCR =====
-Config.OCR_LICENSE   = "DOSWSCI725YWNQ9LTYV8LD45RY31JJ0A|3w6LxXnAOtbSyCYIHrfx6H6e"
+Config.OCR_LICENSE   = ""  -- 运行时或私有配置注入，禁止在源码中硬编码授权码
 Config.OCR_REMARK    = "HiveGreatSage"  -- 不可为空字符串，控制台设备列表中显示
 Config.OCR_REC_TYPE  = "ch-3.0"   -- ch-3.0 / ch-2.0 / ch / cht / japan / korean
 

@@ -60,7 +60,18 @@ function CloudSync.save_params(params_table)
     local resp = _post_auth("/api/params/set", { params = params_table })
     if not resp then return false end
     local ok, data = pcall(jsonLib.decode, resp)
-    return ok and data and data.message ~= nil
+    if not ok or type(data) ~= "table" then
+        Logger.warning("[CloudSync] 保存参数响应解析失败")
+        return false
+    end
+
+    -- Verify 当前 ParamsSetResponse:
+    -- { game_project_code, updated_count, failed_count, results }
+    local failed_count = tonumber(data.failed_count or 0) or 0
+    if failed_count > 0 then
+        Logger.warning("[CloudSync] 保存参数部分失败 failed_count=" .. tostring(failed_count))
+    end
+    return data.updated_count ~= nil and failed_count == 0
 end
 
 return CloudSync

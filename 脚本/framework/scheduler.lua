@@ -2,8 +2,8 @@
 文件位置: 脚本/framework/scheduler.lua
 名称: 任务调度器
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.0
+时间: 2026-05-18
+版本: V1.0.1
 功能及相关说明:
   接收来自 CommLan 的指令，路由到 game/ 对应任务函数执行。
   维护当前任务状态，执行完成后通过 CommLan 上报结果。
@@ -12,8 +12,9 @@
   状态机：IDLE → RUNNING → IDLE（成功/失败后归 IDLE）
 
   任务函数签名约定（game/tasks/ 中每个任务必须遵守）：
-    Task.run(params) → ok (boolean), result_msg (string)
+    Task.run(params) → success (boolean), result_msg (string)
 改进内容:
+  V1.0.1 - 修复 Task.run 多返回值丢失问题，失败原因可正确上报 PC 中控
   V1.0.0 - 初始版本
 调试信息:
   已知问题: 无
@@ -38,40 +39,19 @@ local _task_id    = nil
 local _action     = nil
 local _task_map   = {}   -- action → Task 模块，由 register() 注册
 
--- ---------------------------------------------------------------------
--- Scheduler.register(action, task_module)
--- 注册任务模块。由 game/game_main.lua 在启动时调用。
--- action:      指令 action 字符串，如 "daily_task" / "team_dungeon"
--- task_module: 包含 run(params) 方法的 table
--- ---------------------------------------------------------------------
 function Scheduler.register(action, task_module)
     _task_map[action] = task_module
     Logger.debug(string.format("[Scheduler] 注册任务: %s", action))
 end
 
--- ---------------------------------------------------------------------
--- Scheduler.get_state()
--- 返回当前调度器状态，供 UI 和心跳模块使用。
--- 返回: string（IDLE / RUNNING / ERROR）
--- ---------------------------------------------------------------------
 function Scheduler.get_state()
     return _state
 end
 
--- ---------------------------------------------------------------------
--- Scheduler.get_current_action()
--- 返回当前正在执行的 action 名称。
--- 返回: string 或 nil
--- ---------------------------------------------------------------------
 function Scheduler.get_current_action()
     return _action
 end
 
--- ---------------------------------------------------------------------
--- Scheduler.on_command(cmd)
--- CommLan 收到 PC 指令后调用此函数。
--- cmd: { type, task_id, action, params, ... }
--- ---------------------------------------------------------------------
 function Scheduler.on_command(cmd)
     local t = cmd.type
 
@@ -115,10 +95,6 @@ function Scheduler.on_command(cmd)
     end
 end
 
--- ---------------------------------------------------------------------
--- Scheduler._execute(cmd)
--- 内部：执行任务指令。
--- ---------------------------------------------------------------------
 function Scheduler._execute(cmd)
     local action  = cmd.action
     local task_id = cmd.task_id or ("auto_" .. os.time())
@@ -141,26 +117,18 @@ function Scheduler._execute(cmd)
     beginThread(function()
         ErrorHandler.heartbeat()
 
-        local ok, result_msg = pcall(function()
+        local ok, success, msg = pcall(function()
             return task_mod.run(params)
         end)
 
         if not ok then
-            -- pcall 捕获到 Lua 错误
-            Logger.error(string.format("[Scheduler] 任务 %s 抛出异常: %s", action, tostring(result_msg)))
+            -- pcall 捕获到 Lua 错误；此时 success 实际为异常信息
+            Logger.error(string.format("[Scheduler] 任务 %s 抛出异常: %s", action, tostring(success)))
             _state  = STATE_ERROR
             _action = nil
             Heartbeat.set_status("error")
-            CommLan.report_result(task_id, "error", { reason = tostring(result_msg) })
+            CommLan.report_result(task_id, "error", { reason = tostring(success) })
             return
-        end
-
-        -- result_msg 是 task_mod.run() 的返回值（boolean, string）
-        local success, msg = result_msg, ""
-        if type(result_msg) == "table" then
-            -- pcall 包了多返回值的情况
-            success = result_msg[1]
-            msg     = result_msg[2] or ""
         end
 
         _state  = STATE_IDLE
@@ -169,19 +137,14 @@ function Scheduler._execute(cmd)
 
         if success then
             Logger.info(string.format("[Scheduler] 任务完成: %s", action))
-            CommLan.report_result(task_id, "success", { message = msg })
+            CommLan.report_result(task_id, "success", { message = tostring(msg or "") })
         else
-            Logger.warning(string.format("[Scheduler] 任务失败: %s — %s", action, msg))
-            CommLan.report_result(task_id, "failed", { reason = msg })
+            Logger.warning(string.format("[Scheduler] 任务失败: %s — %s", action, tostring(msg or "")))
+            CommLan.report_result(task_id, "failed", { reason = tostring(msg or "") })
         end
     end)
 end
 
--- ---------------------------------------------------------------------
--- Scheduler.run()
--- 启动调度器：注册 CommLan 指令回调，进入等待循环。
--- 在所有模块初始化完成后由 main.lua 调用。
--- ---------------------------------------------------------------------
 function Scheduler.run()
     -- 注册 CommLan 指令回调
     CommLan.set_command_handler(function(cmd)

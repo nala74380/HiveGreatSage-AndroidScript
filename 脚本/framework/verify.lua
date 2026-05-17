@@ -2,15 +2,21 @@
 文件位置: 脚本/framework/verify.lua
 名称: 登录验证模块
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-28
-版本: V1.0.2
+时间: 2026-05-18
+版本: V1.1.0
 功能及相关说明:
-  设备指纹优先级：
+  设备内部稳定绑定键优先级：
     1. 设备.取硬件序列号()  蜂群插件（最可靠）
-    2. getSubscriberId()   懒人精灵内置 IMSI
-    3. getWifiMac()        wifi mac fallback
-    4. 时间戳              最后手段
+    2. getWifiMac()        WiFi MAC fallback
+    3. 时间戳              最后手段
+
+  当前设备标识口径：
+    - device_fingerprint = 内部稳定绑定键
+    - device_id          = 用户自定义设备编号
+    - connection_type    = usb / tcp / unknown
+    - connection_label   = USB 显示 SN；TCP 显示 IP:端口
 改进内容:
+  V1.1.0 - 删除 IMSI 回退；登录与刷新补 device_id / connection 标识字段
   V1.0.2 - 加入 设备.取硬件序列号() 作为首选指纹
   V1.0.1 - 修正 httpPost 参数顺序
   V1.0.0 - 初始版本
@@ -26,6 +32,7 @@ local KEY_ACCESS_TOKEN  = "hive_access_token"
 local KEY_REFRESH_TOKEN = "hive_refresh_token"
 local KEY_USERNAME      = "hive_username"
 local KEY_PASSWORD      = "hive_password"
+local KEY_DEVICE_ID     = "hive_device_id"
 
 local _access_token  = nil
 local _refresh_token = nil
@@ -34,7 +41,6 @@ local _fingerprint   = nil
 function Verify.get_fingerprint()
     if _fingerprint then return _fingerprint end
 
-    -- 1. 蜂群插件硬件序列号（最可靠）
     local ok1, serial = pcall(function()
         local lrSDK = require("老狼孩插件懒人ROOT版")
         return lrSDK and lrSDK.设备 and lrSDK.设备.取硬件序列号 and lrSDK.设备.取硬件序列号()
@@ -45,15 +51,6 @@ function Verify.get_fingerprint()
         return _fingerprint
     end
 
-    -- 2. IMSI（懒人精灵内置）
-    local ok2, imsi = pcall(getSubscriberId)
-    if ok2 and imsi and imsi ~= "" then
-        _fingerprint = imsi
-        Logger.debug("[Verify] 指纹来源: IMSI")
-        return _fingerprint
-    end
-
-    -- 3. WiFi MAC
     local ok3, mac = pcall(getWifiMac)
     if ok3 and mac and mac ~= "" then
         _fingerprint = mac:gsub(":", "")
@@ -61,10 +58,36 @@ function Verify.get_fingerprint()
         return _fingerprint
     end
 
-    -- 4. 时间戳兜底
     _fingerprint = "fb_" .. tostring(os.time())
     Logger.warning("[Verify] 无法获取设备唯一标识，使用兜底值: " .. _fingerprint)
     return _fingerprint
+end
+
+function Verify.get_device_id()
+    local device_id = tostring(readKeyVal(KEY_DEVICE_ID) or "")
+    return device_id:match("^%s*(.-)%s*$")
+end
+
+function Verify.set_device_id(device_id)
+    local value = tostring(device_id or ""):match("^%s*(.-)%s*$")
+    writeKeyVal(KEY_DEVICE_ID, value)
+end
+
+function Verify.get_connection_info()
+    local ok1, serial = pcall(function()
+        local lrSDK = require("老狼孩插件懒人ROOT版")
+        return lrSDK and lrSDK.设备 and lrSDK.设备.取硬件序列号 and lrSDK.设备.取硬件序列号()
+    end)
+    if ok1 and serial and serial ~= "" then
+        return "usb", "SN:" .. tostring(serial)
+    end
+
+    local lan_ip = tostring(readKeyVal("hive_lan_ip") or ""):match("^%s*(.-)%s*$")
+    if lan_ip ~= "" then
+        return "tcp", string.format("%s:%d", lan_ip, Config.LAN_PORT)
+    end
+
+    return "unknown", nil
 end
 
 -- httpPost(url, postdata, timeout, header) → ret, code
@@ -105,21 +128,30 @@ local function _load_tokens()
     _refresh_token = readKeyVal(KEY_REFRESH_TOKEN) or ""
 end
 
-function Verify.login(username, password)
+function Verify.login(username, password, device_id)
     local fp = Verify.get_fingerprint()
+    local custom_device_id = tostring(device_id or Verify.get_device_id() or ""):match("^%s*(.-)%s*$")
+    local connection_type, connection_label = Verify.get_connection_info()
+    Verify.set_device_id(custom_device_id)
     writeKeyVal(KEY_USERNAME, username or "")
-    -- 密码用设备指纹加密后存储，防止明文直接被读取
     writeKeyVal(KEY_PASSWORD, Crypto.encrypt(password or "", fp))
 
-    Logger.info(string.format("[Verify] 登录 user=%s fp=%s", username, fp))
+    Logger.info(string.format("[Verify] 登录 user=%s fp=%s device_id=%s", username, fp, custom_device_id))
 
-    local resp = _post("/api/auth/login", {
-        username           = username,
-        password           = password,
-        project_uuid       = Config.PROJECT_UUID,
+    local payload = {
+        username = username,
+        password = password,
+        project_uuid = Config.PROJECT_UUID,
         device_fingerprint = fp,
-        client_type        = "android",
-    })
+        client_type = "android",
+        connection_type = connection_type,
+        connection_label = connection_label,
+    }
+    if custom_device_id ~= "" then
+        payload.device_id = custom_device_id
+    end
+
+    local resp = _post("/api/auth/login", payload)
     if not resp then return false, "网络请求失败" end
 
     local ok, data = pcall(jsonLib.decode, resp)
@@ -135,14 +167,18 @@ function Verify.login(username, password)
     end
 
     _save_tokens(data.access_token, data.refresh_token)
-    Logger.info(string.format("[Verify] 登录成功 level=%s", data.user_level or ""))
+    Logger.info(string.format("[Verify] 登录成功 level=%s", data.authorization_level or ""))
     return true, nil
 end
 
 function Verify.refresh_token()
     _load_tokens()
     if not _refresh_token or _refresh_token == "" then return false end
-    local resp = _post("/api/auth/refresh", { refresh_token = _refresh_token })
+    local resp = _post("/api/auth/refresh", {
+        refresh_token = _refresh_token,
+        device_fingerprint = Verify.get_fingerprint(),
+        client_type = "android",
+    })
     if not resp then return false end
     local ok, data = pcall(jsonLib.decode, resp)
     if not ok or not data.access_token then

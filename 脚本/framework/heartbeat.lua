@@ -33,11 +33,16 @@ local function _beat()
         return
     end
 
-    local ok_body, body = pcall(jsonLib.encode, {
+    local connection_type, connection_label = Verify.get_connection_info()
+    local payload = {
         device_fingerprint = Verify.get_fingerprint(),
+        device_id          = Verify.get_device_id(),
+        connection_type    = connection_type,
+        connection_label   = connection_label,
         status             = _status,
         game_data          = _game_data,
-    })
+    }
+    local ok_body, body = pcall(jsonLib.encode, payload)
     if not ok_body then
         Logger.error("[Heartbeat] jsonLib.encode 失败: " .. tostring(body))
         return

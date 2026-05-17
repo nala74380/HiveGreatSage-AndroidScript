@@ -76,11 +76,12 @@ if not do_login then
     return
 end
 
-local username = (form_data.edit_account  or ""):match("^%s*(.-)%s*$")
-local password = (form_data.edit_password or ""):match("^%s*(.-)%s*$")
-local lan_ip   = (form_data.edit_ctrl_ip  or readKeyVal("hive_lan_ip") or ""):match("^%s*(.-)%s*$")
-local api_url  = (form_data.edit_api_url  or readKeyVal("hive_api_url") or Config.API_BASE_URL or ""):match("^%s*(.-)%s*$")
-local do_delay = form_data.cb_random_delay
+local username  = (form_data.edit_account  or ""):match("^%s*(.-)%s*$")
+local password  = (form_data.edit_password or ""):match("^%s*(.-)%s*$")
+local device_id = (form_data.edit_alias    or readKeyVal("hive_device_id") or ""):match("^%s*(.-)%s*$")
+local lan_ip    = (form_data.edit_ctrl_ip  or readKeyVal("hive_lan_ip") or ""):match("^%s*(.-)%s*$")
+local api_url   = (form_data.edit_api_url  or readKeyVal("hive_api_url") or Config.API_BASE_URL or ""):match("^%s*(.-)%s*$")
+local do_delay  = form_data.cb_random_delay
 
 -- API 地址持久化（下次启动预填）
 if api_url ~= "" then
@@ -117,7 +118,7 @@ end
 
 -- Step 7：登录验证
 Logger.info("[main] Step7 登录 user=" .. username)
-local login_ok, login_err = Verify.login(username, password)
+local login_ok, login_err = Verify.login(username, password, device_id)
 if not login_ok then
     toast("登录失败: " .. tostring(login_err))
     exitScript()

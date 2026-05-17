@@ -3,12 +3,11 @@
 名称: 登录验证模块
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-18
-版本: V1.1.0
+版本: V1.1.1
 功能及相关说明:
   设备内部稳定绑定键优先级：
     1. 设备.取硬件序列号()  蜂群插件（最可靠）
-    2. getWifiMac()        WiFi MAC fallback
-    3. 时间戳              最后手段
+    2. 时间戳              最后手段
 
   当前设备标识口径：
     - device_fingerprint = 内部稳定绑定键
@@ -16,6 +15,7 @@
     - connection_type    = usb / tcp / unknown
     - connection_label   = USB 显示 SN；TCP 显示 IP:端口
 改进内容:
+  V1.1.1 - 删除 WiFi MAC 回退，保持设备标识体系最小化
   V1.1.0 - 删除 IMSI 回退；登录与刷新补 device_id / connection 标识字段
   V1.0.2 - 加入 设备.取硬件序列号() 作为首选指纹
   V1.0.1 - 修正 httpPost 参数顺序
@@ -48,13 +48,6 @@ function Verify.get_fingerprint()
     if ok1 and serial and serial ~= "" then
         _fingerprint = tostring(serial)
         Logger.debug("[Verify] 指纹来源: 硬件序列号")
-        return _fingerprint
-    end
-
-    local ok3, mac = pcall(getWifiMac)
-    if ok3 and mac and mac ~= "" then
-        _fingerprint = mac:gsub(":", "")
-        Logger.debug("[Verify] 指纹来源: WiFi MAC")
         return _fingerprint
     end
 

@@ -34,14 +34,22 @@ local function _beat()
     end
 
     local connection_type, connection_label = Verify.get_connection_info()
+    local device_id = Verify.get_device_id()
     local payload = {
         device_fingerprint = Verify.get_fingerprint(),
-        device_id          = Verify.get_device_id(),
-        connection_type    = connection_type,
-        connection_label   = connection_label,
         status             = _status,
         game_data          = _game_data,
     }
+    -- Optional fields must be omitted when empty; backend rejects empty string by schema.
+    if device_id and device_id ~= "" then
+        payload.device_id = device_id
+    end
+    if connection_type and connection_type ~= "" then
+        payload.connection_type = connection_type
+    end
+    if connection_label and connection_label ~= "" then
+        payload.connection_label = connection_label
+    end
     local ok_body, body = pcall(jsonLib.encode, payload)
     if not ok_body then
         Logger.error("[Heartbeat] jsonLib.encode 失败: " .. tostring(body))

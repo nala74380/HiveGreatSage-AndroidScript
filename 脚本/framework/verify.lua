@@ -6,8 +6,9 @@
 版本: V1.1.1
 功能及相关说明:
   设备内部稳定绑定键优先级：
-    1. 设备.取硬件序列号()  蜂群插件（最可靠）
-    2. 时间戳              最后手段
+    1. getHardware()        懒人精灵硬件序列号
+    2. 已保存的兜底绑定键
+    3. 首次生成并保存的兜底绑定键
 
   当前设备标识口径：
     - device_fingerprint = 内部稳定绑定键
@@ -15,9 +16,10 @@
     - connection_type    = usb / tcp / unknown
     - connection_label   = USB 显示 SN；TCP 显示 IP:端口
 改进内容:
+  V1.1.2 - 使用懒人精灵 getHardware() 获取硬件序列号
   V1.1.1 - 删除 WiFi MAC 回退，保持设备标识体系最小化
   V1.1.0 - 删除 IMSI 回退；登录与刷新补 device_id / connection 标识字段
-  V1.0.2 - 加入 设备.取硬件序列号() 作为首选指纹
+  V1.0.2 - 加入硬件序列号作为首选指纹
   V1.0.1 - 修正 httpPost 参数顺序
   V1.0.0 - 初始版本
 --]]
@@ -33,46 +35,76 @@ local KEY_REFRESH_TOKEN = "hive_refresh_token"
 local KEY_USERNAME      = "hive_username"
 local KEY_PASSWORD      = "hive_password"
 local KEY_DEVICE_ID     = "hive_device_id"
+local KEY_FINGERPRINT   = "hive_device_fingerprint"
 
 local _access_token  = nil
 local _refresh_token = nil
 local _fingerprint   = nil
+local function _trim(value)
+    return tostring(value or ""):match("^%s*(.-)%s*$")
+end
+
+local function _persist_fingerprint(value)
+    local fp = _trim(value)
+    if fp ~= "" then
+        writeKeyVal(KEY_FINGERPRINT, fp)
+    end
+    return fp
+end
+
+local function _read_hardware_serial()
+    local ok, hardware = pcall(function()
+        return getHardware()
+    end)
+    if ok then
+        return _trim(hardware)
+    end
+    return ""
+end
 
 function Verify.get_fingerprint()
-    if _fingerprint then return _fingerprint end
-
-    local ok1, serial = pcall(function()
-        local lrSDK = require("老狼孩插件懒人ROOT版")
-        return lrSDK and lrSDK.设备 and lrSDK.设备.取硬件序列号 and lrSDK.设备.取硬件序列号()
-    end)
-    if ok1 and serial and serial ~= "" then
-        _fingerprint = tostring(serial)
-        Logger.debug("[Verify] 指纹来源: 硬件序列号")
+    if _fingerprint and _fingerprint ~= "" then
         return _fingerprint
     end
 
-    _fingerprint = "fb_" .. tostring(os.time())
-    Logger.warning("[Verify] 无法获取设备唯一标识，使用兜底值: " .. _fingerprint)
+    local hw_serial = _read_hardware_serial()
+    if hw_serial ~= "" then
+        _fingerprint = _persist_fingerprint(hw_serial)
+        Logger.debug("[Verify] 指纹来源: getHardware")
+        return _fingerprint
+    end
+
+    local saved = _trim(readKeyVal(KEY_FINGERPRINT))
+    if saved ~= "" then
+        _fingerprint = saved
+        Logger.warning("[Verify] 硬件序列号不可用，使用已保存的绑定键: " .. _fingerprint)
+        return _fingerprint
+    end
+
+    -- fallback must be persisted, otherwise each login may create a new binding key.
+    local entropy = tostring({}):gsub("[^0-9A-Fa-f]", "")
+    if entropy == "" then
+        entropy = tostring(math.random(100000, 999999))
+    end
+    local new_fb = string.format("fb_%d_%s", os.time(), entropy)
+    _fingerprint = _persist_fingerprint(new_fb)
+    Logger.warning("[Verify] 无法获取设备唯一标识，已生成并保存兜底绑定键: " .. _fingerprint)
     return _fingerprint
 end
 
 function Verify.get_device_id()
-    local device_id = tostring(readKeyVal(KEY_DEVICE_ID) or "")
-    return device_id:match("^%s*(.-)%s*$")
+    return _trim(readKeyVal(KEY_DEVICE_ID))
 end
 
 function Verify.set_device_id(device_id)
-    local value = tostring(device_id or ""):match("^%s*(.-)%s*$")
+    local value = _trim(device_id)
     writeKeyVal(KEY_DEVICE_ID, value)
 end
 
 function Verify.get_connection_info()
-    local ok1, serial = pcall(function()
-        local lrSDK = require("老狼孩插件懒人ROOT版")
-        return lrSDK and lrSDK.设备 and lrSDK.设备.取硬件序列号 and lrSDK.设备.取硬件序列号()
-    end)
-    if ok1 and serial and serial ~= "" then
-        return "usb", "SN:" .. tostring(serial)
+    local hardware = _read_hardware_serial()
+    if hardware ~= "" then
+        return "usb", "SN:" .. hardware
     end
 
     local lan_ip = tostring(readKeyVal("hive_lan_ip") or ""):match("^%s*(.-)%s*$")

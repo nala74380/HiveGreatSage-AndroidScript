@@ -144,7 +144,7 @@ function _hive_build_ui()
     ui.addEditText("tab_login", "edit_password", "", -1)
 
     ui.newRow("tab_login", "row_l2")
-    ui.addTextView("tab_login", "lbl_alias", "设备编号")
+    ui.addTextView("tab_login", "lbl_alias", "设备编号（选填）")
     ui.addEditText("tab_login", "edit_alias", readKeyVal("hive_device_id") or "", -1)
 
     ui.newRow("tab_login", "row_l3")

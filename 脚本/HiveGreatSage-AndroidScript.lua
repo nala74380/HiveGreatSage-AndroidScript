@@ -7,7 +7,7 @@
 功能及相关说明:
   懒人精灵项目唯一入口。
 改进内容:
-  V1.0.2 - 显式 require 蜂群插件和老狼孩插件（.lcprojit <luaej/>为空，不会自动加载）
+  V1.0.2 - 显式 require 蜂群插件（.lcprojit <luaej/>为空，不会自动加载）
   V1.0.1 - 动态UI方案
   V1.0.0 - 初始版本
 --]]
@@ -31,10 +31,8 @@ KV.register_globals()
 
 -- 插件显式加载（.lcprojit <luaej/> 为空，不会自动加载）
 -- 加载后注册全局表：图像. 设备. 文件. 触控. 等（swarmChinese）
--- 以及全局 lrSDK（老狼孩）
 require("swarmChinese")
 运行环境(1)            -- 1=ROOT模式，初始化 图像. 设备. 触控. 等全局表
-require("老狼孩插件懒人ROOT版")
 
 -- 模块加载
 local Config       = require("config")

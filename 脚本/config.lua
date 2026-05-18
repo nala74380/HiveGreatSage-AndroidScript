@@ -27,7 +27,7 @@ Config.GAME_PACKAGE = "com.example.game"   -- TODO: fork 后修改
 -- ===== 云端 API =====
 -- 实际运行时由 main.lua 从 UI 输入或 KV 存储中读取的 API 地址覆盖此处默认展示地址。
 -- 开发调试时：将此值改为 PC 居域网 IP，如 http://192.168.2.100:8000
-Config.API_BASE_URL  = ""    -- 空字符串表示优先从 UI 输入/KV 存储读取
+Config.API_BASE_URL  = "http://192.168.2.9:8000"    -- 空字符串表示优先从 UI 输入/KV 存储读取
 Config.PROJECT_UUID  = "00000000-0000-0000-0000-000000000001"  -- 与 PC中控共用同一游戏项目 UUID
 
 -- ===== TomatoOCR =====

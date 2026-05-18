@@ -1,17 +1,22 @@
-﻿--[[
-鏂囦欢浣嶇疆: 鑴氭湰/game/ui_helper.lua
-鍚嶇О: 鍚姩 UI锛堝姩鎬?UI 鏂规锛?浣滆€? 铚傚发路澶у湥 (Hive-GreatSage)
-鏃堕棿: 2026-04-28
-鐗堟湰: V1.0.3
-鍔熻兘鍙婄浉鍏宠鏄?
-  鍔ㄦ€?UI 鏂规锛屽畬鍏ㄥ鐓?UI鎶€鏈柟妗坃妗堜緥瀛︿範.md 2.4 鑺傚疄鐜般€?
-  鈿狅笍 鍏抽敭淇锛圴1.0.3锛夛細
-    form_data 蹇呴』鍦?ui.dismiss 涔嬪墠淇濆瓨鍒版ā鍧楀彉閲?_hive_saved_data锛?    show_startup_ui 鐨?while 寰幆閫€鍑哄悗鐩存帴浣跨敤 _hive_saved_data锛?    涓嶅啀閲嶅璋冪敤 ui.getData()锛坉ismiss 鍚庤繑鍥?nil锛夈€?
-鏀硅繘鍐呭:
-  V1.0.3 - 淇 form_data 鍦?dismiss 鍚庝负 nil 鐨?bug锛涙柊澧炶繍琛岄〉娴嬭瘯鎸夐挳
-  V1.0.2 - ui.setValue 鈫?ui.setText
-  V1.0.1 - 鍔ㄦ€乁I鏂规
-  V1.0.0 - 鍒濆鍗犱綅
+--[[
+文件位置: 脚本/game/ui_helper.lua
+名称: 启动 UI（动态 UI 方案）
+作者: 蜂巢·大圣 (Hive-GreatSage)
+时间: 2026-04-28
+版本: V1.0.3
+功能及相关说明:
+  动态 UI 方案，完全对照 UI技术方案_案例学习.md 2.4 节实现。
+
+  ⚠️ 关键修复（V1.0.3）：
+    form_data 必须在 ui.dismiss 之前保存到模块变量 _hive_saved_data，
+    show_startup_ui 的 while 循环退出后直接使用 _hive_saved_data，
+    不再重复调用 ui.getData()（dismiss 后返回 nil）。
+
+改进内容:
+  V1.0.3 - 修复 form_data 在 dismiss 后为 nil 的 bug；新增运行页测试按钮
+  V1.0.2 - ui.setValue → ui.setText
+  V1.0.1 - 动态UI方案
+  V1.0.0 - 初始占位
 --]]
 
 local Config = require("config")
@@ -20,18 +25,18 @@ local Logger = require("framework/logger")
 local UIHelper = {}
 
 -- =====================================================================
--- 鍏ㄥ眬鐘舵€侊紙鍥炶皟鍑芥暟鍙闂級
+-- 全局状态（回调函数可访问）
 -- =====================================================================
 _hive_close_flag  = false
 _hive_do_login    = false
 _hive_auto_run    = true
-_hive_saved_data  = {}     -- 鈿狅笍 dismiss 鍓嶅湪 _hive_on_login 閲屼繚瀛橈紝閬垮厤 dismiss 鍚?getData 杩斿洖 nil
-_HIVE_UI_NAME     = "铚傚发鍚姩鐣岄潰"
-_HIVE_DIALOG      = "纭瀵硅瘽妗?
+_hive_saved_data  = {}     -- ⚠️ dismiss 前在 _hive_on_login 里保存，避免 dismiss 后 getData 返回 nil
+_HIVE_UI_NAME     = "蜂巢启动界面"
+_HIVE_DIALOG      = "确认对话框"
 _HIVE_CFG_PATH    = getSdPath() .. "/hive_ui.json"
 
 -- =====================================================================
--- 鍏叡鎺ュ彛
+-- 公共接口
 -- =====================================================================
 
 function UIHelper.show_startup_ui(is_first_login)
@@ -46,36 +51,37 @@ function UIHelper.show_startup_ui(is_first_login)
 
     _hive_build_ui()
 
-    -- 鎭㈠閰嶇疆锛堝瘑鐮佷笉鎸佷箙鍖栵級
+    -- 恢复配置（密码不持久化）
     pcall(function() ui.loadProfile(_HIVE_CFG_PATH) end)
     ui.setText("edit_password", "")
 
     ui.show(_HIVE_UI_NAME, false)
 
-    -- 鍊掕鏃讹紙for + sleep锛屼笉鑳界敤 setTimer锛?    for i = 1, countdown do
+    -- 倒计时（for + sleep，不能用 setTimer）
+    for i = 1, countdown do
         if not _hive_auto_run or _hive_close_flag then break end
         if i == countdown then
-            -- 褰掗浂鑷姩瑙﹀彂鐧诲綍
+            -- 归零自动触发登录
             _hive_auto_login()
             break
         end
         local remain = countdown - i
         ui.setButton("btn_countdown",
-            string.format("%d绉掑悗鑷姩鐧诲綍锛堢偣鍑绘殏鍋滐級", remain))
+            string.format("%d秒后自动登录（点击暂停）", remain))
         sleep(1000)
     end
 
-    -- 绛夊緟 dismiss
+    -- 等待 dismiss
     while not _hive_close_flag do sleep(100) end
 
-    -- 鈿狅笍 鐩存帴浣跨敤 dismiss 鍓嶄繚瀛樼殑鏁版嵁锛屼笉鍐嶈皟 ui.getData()
+    -- ⚠️ 直接使用 dismiss 前保存的数据，不再调 ui.getData()
     local data = _hive_saved_data
 
-    -- 淇濆瓨涓帶 IP
+    -- 保存中控 IP
     local ctrl_ip = data.edit_ctrl_ip or ""
     if ctrl_ip ~= "" then writeKeyVal("hive_lan_ip", ctrl_ip) end
 
-    Logger.info(string.format("[UIHelper] 缁撴潫 do_login=%s account=%s",
+    Logger.info(string.format("[UIHelper] 结束 do_login=%s account=%s",
         tostring(_hive_do_login), tostring(data.edit_account or "")))
 
     return _hive_do_login, data
@@ -83,22 +89,24 @@ end
 
 -- ---------------------------------------------------------------------
 -- UIHelper.update_status(text)
--- 鏇存柊杩愯椤电姸鎬佹枃瀛?-- ---------------------------------------------------------------------
+-- 更新运行页状态文字
+-- ---------------------------------------------------------------------
 function UIHelper.update_status(text)
     pcall(ui.setText, "tv_run_status", tostring(text))
 end
 
 -- ---------------------------------------------------------------------
 -- UIHelper.update_conn_status(verify_ok, lan_ok)
--- 鏇存柊杩愯椤佃繛鎺ョ姸鎬?-- ---------------------------------------------------------------------
+-- 更新运行页连接状态
+-- ---------------------------------------------------------------------
 function UIHelper.update_conn_status(verify_ok, lan_ok)
-    local v = verify_ok and "浜戠锛氣湏" or "浜戠锛氣湕"
-    local l = lan_ok    and "涓帶锛氣湏" or "涓帶锛氣湕"
+    local v = verify_ok and "云端：✓" or "云端：✗"
+    local l = lan_ok    and "中控：✓" or "中控：✗"
     pcall(ui.setText, "tv_conn_status", v .. "  |  " .. l)
 end
 
 -- =====================================================================
--- 鍐呴儴锛氳嚜鍔ㄧ櫥褰曪紙鍊掕鏃跺綊闆讹級
+-- 内部：自动登录（倒计时归零）
 -- =====================================================================
 function _hive_auto_login()
     local ok, data = pcall(ui.getData)
@@ -110,117 +118,119 @@ function _hive_auto_login()
 end
 
 -- =====================================================================
--- 鍐呴儴锛氭瀯寤?UI 甯冨眬
+-- 内部：构建 UI 布局
 -- =====================================================================
 function _hive_build_ui()
     local name = _HIVE_UI_NAME
     ui.newLayout(name, -1, -1)
 
-    -- 鏍囬
+    -- 标题
     ui.newRow(name, "row_title")
-    ui.addTextView(name, "tv_title", "铚傚发路澶у湥")
+    ui.addTextView(name, "tv_title", "蜂巢·大圣")
 
     -- Tab
     ui.addTabView(name, "main_tab")
-    ui.addTab("main_tab", "tab_login",    "鐧诲綍")
-    ui.addTab("main_tab", "tab_run",      "杩愯")
-    ui.addTab("main_tab", "tab_settings", "璁剧疆")
+    ui.addTab("main_tab", "tab_login",    "登录")
+    ui.addTab("main_tab", "tab_run",      "运行")
+    ui.addTab("main_tab", "tab_settings", "设置")
 
-    -- 鈺愨晲 鐧诲綍 Tab 鈺愨晲
+    -- ══ 登录 Tab ══
     ui.newRow("tab_login", "row_l0")
-    ui.addTextView("tab_login", "lbl_account", "璐﹀彿")
+    ui.addTextView("tab_login", "lbl_account", "账号")
     ui.addEditText("tab_login", "edit_account", "", -1)
 
     ui.newRow("tab_login", "row_l1")
-    ui.addTextView("tab_login", "lbl_password", "瀵嗙爜")
+    ui.addTextView("tab_login", "lbl_password", "密码")
     ui.addEditText("tab_login", "edit_password", "", -1)
 
     ui.newRow("tab_login", "row_l2")
-    ui.addTextView("tab_login", "lbl_alias", "设备编号（选填）")
+    ui.addTextView("tab_login", "lbl_alias", "设备编号")
     ui.addEditText("tab_login", "edit_alias", readKeyVal("hive_device_id") or "", -1)
 
     ui.newRow("tab_login", "row_l3")
     ui.addCheckBox("tab_login", "cb_random_delay",
-        string.format("闅忔満寤舵椂 %d鈥?ds锛堝璁惧闃插悓姝ワ級",
+        string.format("随机延时 %d–%ds（多设备防同步）",
         Config.RANDOM_DELAY_MIN, Config.RANDOM_DELAY_MAX),
-        false)   -- 寮€鍙戦樁娈甸粯璁ゅ叧闂?
+        false)   -- 开发阶段默认关闭
+
     ui.newRow("tab_login", "row_l4")
-    ui.addButton("tab_login", "btn_countdown", "鍒濆鍖栦腑...")
+    ui.addButton("tab_login", "btn_countdown", "初始化中...")
     ui.setOnClick("btn_countdown", "_hive_pause_countdown()")
 
     ui.newRow("tab_login", "row_l5")
-    ui.addButton("tab_login", "btn_cancel", "鍙栨秷")
-    ui.addButton("tab_login", "btn_login",  "鐧诲綍")
+    ui.addButton("tab_login", "btn_cancel", "取消")
+    ui.addButton("tab_login", "btn_login",  "登录")
     ui.setOnClick("btn_cancel", "_hive_on_cancel()")
     ui.setOnClick("btn_login",  "_hive_on_login()")
 
-    -- 鈺愨晲 杩愯 Tab 鈺愨晲
+    -- ══ 运行 Tab ══
     ui.newRow("tab_run", "row_r0")
-    ui.addTextView("tab_run", "tv_run_title", "杩愯鐘舵€?)
+    ui.addTextView("tab_run", "tv_run_title", "运行状态")
 
     ui.newRow("tab_run", "row_r1")
-    ui.addTextView("tab_run", "tv_run_status", "寰呮満涓?)
+    ui.addTextView("tab_run", "tv_run_status", "待机中")
 
     ui.newRow("tab_run", "row_r2")
-    ui.addTextView("tab_run", "tv_conn_status", "浜戠锛氭湭杩炴帴  |  涓帶锛氭湭杩炴帴")
+    ui.addTextView("tab_run", "tv_conn_status", "云端：未连接  |  中控：未连接")
 
-    -- 娴嬭瘯鎸夐挳鍖?    ui.newRow("tab_run", "row_r3")
-    ui.addTextView("tab_run", "tv_test_title", "鈹€鈹€ 寮€鍙戞祴璇?鈹€鈹€")
+    -- 测试按钮区
+    ui.newRow("tab_run", "row_r3")
+    ui.addTextView("tab_run", "tv_test_title", "── 开发测试 ──")
 
     ui.newRow("tab_run", "row_r4")
-    ui.addButton("tab_run", "btn_test_verify", "娴嬭瘯楠岃瘉绯荤粺杩炴帴")
+    ui.addButton("tab_run", "btn_test_verify", "测试验证系统连接")
     ui.setOnClick("btn_test_verify", "_hive_test_verify()")
 
     ui.newRow("tab_run", "row_r5")
-    ui.addButton("tab_run", "btn_test_lan", "娴嬭瘯涓帶杩炴帴")
+    ui.addButton("tab_run", "btn_test_lan", "测试中控连接")
     ui.setOnClick("btn_test_lan", "_hive_test_lan()")
 
     ui.newRow("tab_run", "row_r6")
     ui.addTextView("tab_run", "tv_test_result", "")
 
-    -- 鈺愨晲 璁剧疆 Tab 鈺愨晲
+    -- ══ 设置 Tab ══
     ui.newRow("tab_settings", "row_s0")
-    ui.addTextView("tab_settings", "lbl_api_url", "鏈嶅姟鍣ㄥ湴鍧€")
+    ui.addTextView("tab_settings", "lbl_api_url", "服务器地址")
     ui.addEditText("tab_settings", "edit_api_url",
         readKeyVal("hive_api_url") or Config.API_BASE_URL or "", -1)
 
     ui.newRow("tab_settings", "row_s0b")
     ui.addTextView("tab_settings", "tv_api_tip",
-        "鏍煎紡锛歨ttp://192.168.x.x:8000锛堝眳鍩熺綉 IP锛?)
+        "格式：http://192.168.x.x:8000（居域网 IP）")
 
     ui.newRow("tab_settings", "row_s1")
-    ui.addTextView("tab_settings", "lbl_ctrl_ip", "PC 涓帶 IP")
+    ui.addTextView("tab_settings", "lbl_ctrl_ip", "PC 中控 IP")
     ui.addEditText("tab_settings", "edit_ctrl_ip",
         readKeyVal("hive_lan_ip") or "", -1)
 
     ui.newRow("tab_settings", "row_s1b")
-    ui.addTextView("tab_settings", "tv_ctrl_tip", "灞呭煙缃?IP锛屽 192.168.2.9")
+    ui.addTextView("tab_settings", "tv_ctrl_tip", "居域网 IP，如 192.168.2.9")
 
     ui.newRow("tab_settings", "row_s2")
-    ui.addButton("tab_settings", "btn_save_settings", "淇濆瓨璁剧疆")
+    ui.addButton("tab_settings", "btn_save_settings", "保存设置")
     ui.setOnClick("btn_save_settings", "_hive_save_settings()")
 
     ui.newRow("tab_settings", "row_s3")
-    ui.addTextView("tab_settings", "tv_danger", "鈹€鈹€鈹€ 鍗遍櫓鎿嶄綔 鈹€鈹€鈹€")
+    ui.addTextView("tab_settings", "tv_danger", "─── 危险操作 ───")
 
     ui.newRow("tab_settings", "row_s4")
-    ui.addButton("tab_settings", "btn_global_init", "鍏ㄥ眬鍒濆鍖栵紙娓呴櫎娓告垙鏁版嵁锛?)
+    ui.addButton("tab_settings", "btn_global_init", "全局初始化（清除游戏数据）")
     ui.setOnClick("btn_global_init", "_hive_global_init()")
 
     ui.setOnClose(name, "_hive_on_close()")
 end
 
 -- =====================================================================
--- 鍏ㄥ眬鍥炶皟
+-- 全局回调
 -- =====================================================================
 
 function _hive_pause_countdown()
     _hive_auto_run = false
-    ui.setButton("btn_countdown", "宸叉殏鍋滐紝鐐圭櫥褰曠户缁?)
+    ui.setButton("btn_countdown", "已暂停，点登录继续")
 end
 
 function _hive_on_login()
-    -- 鈿狅笍 蹇呴』鍦?dismiss 鍓嶅彇鏁版嵁骞朵繚瀛樺埌 _hive_saved_data
+    -- ⚠️ 必须在 dismiss 前取数据并保存到 _hive_saved_data
     local ok, data = pcall(ui.getData)
     _hive_saved_data = (ok and data) or {}
     if _hive_saved_data.edit_account and _hive_saved_data.edit_account ~= "" then
@@ -259,74 +269,76 @@ function _hive_save_settings()
         if ctrl_ip ~= "" then
             writeKeyVal("hive_lan_ip", ctrl_ip)
         end
-        toast("璁剧疆宸蹭繚瀛?)
+        toast("设置已保存")
     end
 end
 
--- 鈹€鈹€ 娴嬭瘯锛氶獙璇佺郴缁熻繛鎺?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+-- ── 测试：验证系统连接 ────────────────────────────────────────────────
 function _hive_test_verify()
-    ui.setText("tv_test_result", "娴嬭瘯涓?..")
+    ui.setText("tv_test_result", "测试中...")
     beginThread(function()
         local url    = Config.API_BASE_URL .. "/health"
         local ret, code = httpGet(url, 10)
         local msg
         if ret and tostring(code) == "200" then
-            msg = "鉁?楠岃瘉绯荤粺杩炴帴姝ｅ父 (200)"
-            Logger.info("[UIHelper] 楠岃瘉绯荤粺杩炴帴姝ｅ父")
+            msg = "✓ 验证系统连接正常 (200)"
+            Logger.info("[UIHelper] 验证系统连接正常")
         else
-            msg = string.format("鉁?楠岃瘉绯荤粺杩炴帴澶辫触 (code=%s)", tostring(code))
-            Logger.warning("[UIHelper] 楠岃瘉绯荤粺杩炴帴澶辫触 code=" .. tostring(code))
+            msg = string.format("✗ 验证系统连接失败 (code=%s)", tostring(code))
+            Logger.warning("[UIHelper] 验证系统连接失败 code=" .. tostring(code))
         end
         ui.setText("tv_test_result", msg)
         UIHelper.update_conn_status(tostring(code) == "200", false)
     end)
 end
 
--- 鈹€鈹€ 娴嬭瘯锛氫腑鎺?WebSocket 杩炴帴 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+-- ── 测试：中控 WebSocket 连接 ─────────────────────────────────────────
 function _hive_test_lan()
     local ip = readKeyVal("hive_lan_ip") or ""
     if ip == "" then
-        ui.setText("tv_test_result", "鉁?璇峰厛鍦ㄨ缃〉濉啓涓帶 IP")
+        ui.setText("tv_test_result", "✗ 请先在设置页填写中控 IP")
         return
     end
-    ui.setText("tv_test_result", "杩炴帴涓?ws://" .. ip .. ":8889 ...")
-    Logger.info("[UIHelper] 娴嬭瘯涓帶杩炴帴 " .. ip)
+    ui.setText("tv_test_result", "连接中 ws://" .. ip .. ":8889 ...")
+    Logger.info("[UIHelper] 测试中控连接 " .. ip)
 
     local CommLan = require("framework/comm_lan")
 
-    -- 鍏堟柇寮€鏃ц繛鎺ワ紝鍐嶅缓鏂扮殑
+    -- 先断开旧连接，再建新的
     CommLan.disconnect()
     sleep(300)
 
     CommLan.set_command_handler(function(cmd)
         if cmd.type == "auth_ok" then
-            ui.setText("tv_test_result", "鉁?涓帶杩炴帴姝ｅ父锛坅uth_ok锛?)
+            ui.setText("tv_test_result", "✓ 中控连接正常（auth_ok）")
             UIHelper.update_conn_status(false, true)
         elseif cmd.type == "auth_failed" then
-            ui.setText("tv_test_result", "鉁?涓帶 auth 澶辫触: " .. tostring(cmd.reason))
+            ui.setText("tv_test_result", "✗ 中控 auth 失败: " .. tostring(cmd.reason))
         end
     end)
 
     CommLan.connect(ip)
 
-    -- 5s 鍚庢鏌?    setTimer(function()
+    -- 5s 后检查
+    setTimer(function()
         if CommLan.is_connected() then
-            -- 宸茶繛鎺ヤ笉鍐嶈鐩栨垚鍔熶俊鎭?        else
-            ui.setText("tv_test_result", "鉁?涓帶杩炴帴瓒呮椂锛?s锛夆€斿皾璇曡繃 " .. ip .. ":8889")
-            Logger.warning("[UIHelper] 涓帶杩炴帴瓒呮椂")
+            -- 已连接不再覆盖成功信息
+        else
+            ui.setText("tv_test_result", "✗ 中控连接超时（5s）—尝试过 " .. ip .. ":8889")
+            Logger.warning("[UIHelper] 中控连接超时")
         end
     end, 5000, 1)
 end
 
--- 鈹€鈹€ 鍏ㄥ眬鍒濆鍖?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+-- ── 全局初始化 ────────────────────────────────────────────────────────
 function _hive_global_init()
     ui.newLayout(_HIVE_DIALOG, -2, -2)
     ui.newRow(_HIVE_DIALOG, "dlg_r0")
     ui.addTextView(_HIVE_DIALOG, "tv_dlg",
-        "姝ゆ搷浣滃皢娓呴櫎娓告垙鍏ㄩ儴鏈湴鏁版嵁锛乗n纭鎵ц锛?)
+        "此操作将清除游戏全部本地数据！\n确认执行？")
     ui.newRow(_HIVE_DIALOG, "dlg_r1")
-    ui.addButton(_HIVE_DIALOG, "btn_dlg_yes", "纭")
-    ui.addButton(_HIVE_DIALOG, "btn_dlg_no",  "鍙栨秷")
+    ui.addButton(_HIVE_DIALOG, "btn_dlg_yes", "确认")
+    ui.addButton(_HIVE_DIALOG, "btn_dlg_no",  "取消")
     ui.setOnClick("btn_dlg_yes", "_hive_do_init()")
     ui.setOnClick("btn_dlg_no",  "_hive_cancel_dialog()")
     ui.show(_HIVE_DIALOG, false)
@@ -338,17 +350,16 @@ end
 
 function _hive_do_init()
     ui.dismiss(_HIVE_DIALOG)
-    toast("姝ｅ湪鎵ц鍏ㄥ眬鍒濆鍖?..")
+    toast("正在执行全局初始化...")
     exec("am force-stop " .. Config.GAME_PACKAGE, false)
     sleep(500)
     exec("pm clear " .. Config.GAME_PACKAGE, false)
     writeKeyVal("hive_access_token",  "")
     writeKeyVal("hive_refresh_token", "")
     writeKeyVal("last_account", "")
-    toast("鍏ㄥ眬鍒濆鍖栧畬鎴愶紝鑴氭湰閲嶅惎")
+    toast("全局初始化完成，脚本重启")
     sleep(2000)
     restartScript()
 end
 
 return UIHelper
-

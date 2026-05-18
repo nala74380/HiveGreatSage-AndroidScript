@@ -2,9 +2,10 @@
 文件位置: 脚本/framework/updater.lua
 名称: 热更新模块
 作者: 蜂巢·大圣 (HiveGreatSage)
-时间: 2026-04-28
-版本: V1.0.4
+时间: 2026-05-18
+版本: V1.0.5
 改进内容:
+  V1.0.5 - 接口 URL 拼接改用 framework/url.lua，避免 API_BASE_URL 尾斜杠导致双斜杠
   V1.0.4 - 删除旧检查响应字段名残留注释，便于全仓搜索验证
   V1.0.3 - 开发期清理旧字段兼容；只接受 Verify 当前 current_version/release_notes 字段契约
   V1.0.2 - 版本号改由新包启动后写入；补强强制更新失败阻断
@@ -16,6 +17,7 @@
 local Config = require("config")
 local Logger = require("framework/logger")
 local Verify = require("framework/verify")
+local Url    = require("framework/url")
 
 local Updater = {}
 
@@ -41,7 +43,7 @@ end
 
 -- httpGet(url, timeout, header) → ret, code
 local function _get_auth(path)
-    local url    = Config.API_BASE_URL .. path
+    local url    = Url.join(Config.API_BASE_URL, path)
     local header = "Authorization: Bearer " .. Verify.get_token()
     local ret, code = httpGet(url, 30, header)
     if not ret or ret == "" then

@@ -2,9 +2,10 @@
 文件位置: 脚本/framework/heartbeat.lua
 名称: 云端心跳模块
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-28
-版本: V1.0.3
+时间: 2026-05-18
+版本: V1.0.4
 改进内容:
+  V1.0.4 - 接口 URL 拼接改用 framework/url.lua，避免 API_BASE_URL 尾斜杠导致双斜杠
   V1.0.3 - 改用 beginThread 独立线程循环，解决 setTimer 被主线程 sleep() 阻塞的问题
            主线程 while true do sleep() end 会阻塞 setTimer 回调，心跳永远不触发
   V1.0.2 - 修正 httpPost 参数顺序和 header 格式
@@ -15,6 +16,7 @@
 local Config  = require("config")
 local Logger  = require("framework/logger")
 local Verify  = require("framework/verify")
+local Url     = require("framework/url")
 
 local Heartbeat = {}
 
@@ -48,7 +50,7 @@ local function _beat()
         return
     end
 
-    local url    = Config.API_BASE_URL .. "/api/device/heartbeat"
+    local url    = Url.join(Config.API_BASE_URL, "/api/device/heartbeat")
     local header = "Content-Type: application/json\r\nAuthorization: Bearer " .. token
 
     local ok_req, ret, code = pcall(httpPost, url, body, 15, header)

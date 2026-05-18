@@ -3,11 +3,11 @@
 名称: 登录验证模块
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-18
-版本: V1.1.1
+版本: V1.1.2
 功能及相关说明:
   设备内部稳定绑定键优先级：
     1. 设备.取硬件序列号()  蜂群插件（最可靠）
-    2. 时间戳              最后手段
+    2. KV 持久化 fallback     最后手段，首次生成后固定保存
 
   当前设备标识口径：
     - device_fingerprint = 内部稳定绑定键
@@ -15,6 +15,7 @@
     - connection_type    = usb / tcp / unknown
     - connection_label   = USB 显示 SN；TCP 显示 IP:端口
 改进内容:
+  V1.1.2 - fallback 指纹改为 KV 持久化，避免每次启动 os.time() 导致设备身份漂移
   V1.1.1 - 删除 WiFi MAC 回退，保持设备标识体系最小化
   V1.1.0 - 删除 IMSI 回退；登录与刷新补 device_id / connection 标识字段
   V1.0.2 - 加入 设备.取硬件序列号() 作为首选指纹
@@ -25,6 +26,7 @@
 local Config = require("config")
 local Logger = require("framework/logger")
 local Crypto = require("framework/crypto")
+local Url    = require("framework/url")
 
 local Verify = {}
 
@@ -33,6 +35,7 @@ local KEY_REFRESH_TOKEN = "hive_refresh_token"
 local KEY_USERNAME      = "hive_username"
 local KEY_PASSWORD      = "hive_password"
 local KEY_DEVICE_ID     = "hive_device_id"
+local KEY_FALLBACK_FP   = "hive_fallback_device_fingerprint"
 
 local _access_token  = nil
 local _refresh_token = nil
@@ -51,8 +54,17 @@ function Verify.get_fingerprint()
         return _fingerprint
     end
 
-    _fingerprint = "fb_" .. tostring(os.time())
-    Logger.warning("[Verify] 无法获取设备唯一标识，使用兜底值: " .. _fingerprint)
+    local saved = tostring(readKeyVal(KEY_FALLBACK_FP) or "")
+    if saved ~= "" then
+        _fingerprint = saved
+        Logger.warning("[Verify] 指纹来源: KV fallback: " .. _fingerprint)
+        return _fingerprint
+    end
+
+    math.randomseed(os.time())
+    _fingerprint = "fb_" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+    writeKeyVal(KEY_FALLBACK_FP, _fingerprint)
+    Logger.warning("[Verify] 无法获取设备唯一标识，生成并持久化 fallback 值: " .. _fingerprint)
     return _fingerprint
 end
 
@@ -85,7 +97,7 @@ end
 
 -- httpPost(url, postdata, timeout, header) → ret, code
 local function _post(path, body_table)
-    local url    = Config.API_BASE_URL .. path
+    local url    = Url.join(Config.API_BASE_URL, path)
     local body   = jsonLib.encode(body_table)
     local header = "Content-Type: application/json"
     local ret, code = httpPost(url, body, 30, header)
@@ -98,7 +110,7 @@ local function _post(path, body_table)
 end
 
 local function _post_auth(path, body_table)
-    local url    = Config.API_BASE_URL .. path
+    local url    = Url.join(Config.API_BASE_URL, path)
     local body   = jsonLib.encode(body_table)
     local header = "Content-Type: application/json\r\nAuthorization: Bearer " .. (_access_token or "")
     local ret, code = httpPost(url, body, 30, header)

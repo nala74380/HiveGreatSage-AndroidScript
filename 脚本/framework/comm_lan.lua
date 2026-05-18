@@ -2,8 +2,8 @@
 文件位置: 脚本/framework/comm_lan.lua
 名称: 局域网 WebSocket 通信
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-28
-版本: V1.0.1
+时间: 2026-05-18
+版本: V1.0.2
 功能及相关说明:
   WebSocket API（懒人精灵内置，已核实）：
     startWebSocket(url, onOpened, onClosed, onError, onRecv) → handle
@@ -12,6 +12,7 @@
     ⚠️ closeWebSocket 只能在主线程调用，子线程需用 setTimer 转发
     ⚠️ 回调中禁止直接调 exitScript/restartScript，需 setTimer 转发
 改进内容:
+  V1.0.2 - 将单个 _pending_cmd 改为队列，避免短时间连续消息互相覆盖
   V1.0.1 - 修正 API 名称（sendWebSocketMsg→sendWebSocket，stopWebSocket→closeWebSocket）
   V1.0.0 - 初始版本（D017 方案A）
 --]]
@@ -22,14 +23,31 @@ local Verify  = require("framework/verify")
 
 local CommLan = {}
 
-local _connected   = false
-local _ws_handle   = nil
-local _on_cmd_fn   = nil
-local _pending_cmd = nil
-local _lan_ip      = nil    -- 记录 IP，用于重连
+local _connected          = false
+local _ws_handle          = nil
+local _on_cmd_fn          = nil
+local _pending_queue      = {}
+local _dispatch_scheduled = false
+local _lan_ip             = nil    -- 记录 IP，用于重连
 
 function CommLan.set_command_handler(fn)
     _on_cmd_fn = fn
+end
+
+local function _schedule_dispatch()
+    if _dispatch_scheduled then return end
+    _dispatch_scheduled = true
+
+    setTimer(function()
+        _dispatch_scheduled = false
+
+        while #_pending_queue > 0 do
+            local cmd = table.remove(_pending_queue, 1)
+            if cmd then
+                CommLan._dispatch(cmd)
+            end
+        end
+    end, 50, 1)
 end
 
 -- WebSocket 回调（全局函数，供 startWebSocket 字符串参数使用）
@@ -79,13 +97,9 @@ function _ws_on_recv(handle, message)
         return
     end
     Logger.debug("[CommLan] 收到 type=" .. tostring(data.type))
-    -- ⚠️ 回调中不直接执行业务，setTimer 转到主线程
-    _pending_cmd = data
-    setTimer(function()
-        local cmd = _pending_cmd
-        _pending_cmd = nil
-        if cmd then CommLan._dispatch(cmd) end
-    end, 50, 1)
+    -- ⚠️ 回调中不直接执行业务，入队后 setTimer 转到主线程按序派发
+    table.insert(_pending_queue, data)
+    _schedule_dispatch()
 end
 
 function CommLan.connect(ip)

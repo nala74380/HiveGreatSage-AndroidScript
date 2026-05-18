@@ -7,7 +7,7 @@
 功能及相关说明:
   用于本地 KV 存储中敏感字段（如密码）的简单可逆加密。
   算法：XOR + Base64，不是强加密，目的是防止明文直接被读取。
-  密钥由设备指纹动态派生，不同设备加密结果不同。
+  密钥使用脚本本地固定种子，不参与设备绑定。
 改进内容:
   V1.0.0 - 初始版本
 调试信息:
@@ -70,11 +70,12 @@ local function b64_decode(s)
     return table.concat(result)
 end
 
--- 从设备指纹派生一个简单密钥（取前16字节）
-local function _derive_key(fingerprint)
+-- 从固定种子派生一个简单密钥（取前16字节）
+local function _derive_key(seed)
     local key = {}
+    local source = seed or "hive_local_kv_key"
     for i = 1, 16 do
-        local c = fingerprint:sub(i, i)
+        local c = source:sub(i, i)
         key[i] = c ~= "" and c:byte(1) or (i * 17)
     end
     return key
@@ -91,23 +92,23 @@ local function _xor_cipher(text, key)
 end
 
 -- ─────────────────────────────────────────────────────────────
--- Crypto.encrypt(plain, fingerprint) → encrypted_base64
+-- Crypto.encrypt(plain) → encrypted_base64
 -- ─────────────────────────────────────────────────────────────
-function Crypto.encrypt(plain, fingerprint)
+function Crypto.encrypt(plain)
     if not plain or plain == "" then return "" end
-    local key      = _derive_key(fingerprint or "default_key")
+    local key      = _derive_key()
     local xored    = _xor_cipher(plain, key)
     return b64_encode(xored)
 end
 
 -- ─────────────────────────────────────────────────────────────
--- Crypto.decrypt(encrypted_base64, fingerprint) → plain
+-- Crypto.decrypt(encrypted_base64) → plain
 -- ─────────────────────────────────────────────────────────────
-function Crypto.decrypt(encrypted_b64, fingerprint)
+function Crypto.decrypt(encrypted_b64)
     if not encrypted_b64 or encrypted_b64 == "" then return "" end
     local ok, xored = pcall(b64_decode, encrypted_b64)
     if not ok or xored == "" then return "" end
-    local key = _derive_key(fingerprint or "default_key")
+    local key = _derive_key()
     return _xor_cipher(xored, key)
 end
 

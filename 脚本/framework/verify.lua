@@ -5,18 +5,13 @@
 时间: 2026-05-18
 版本: V1.1.1
 功能及相关说明:
-  设备内部稳定绑定键优先级：
-    1. getHardware()        懒人精灵硬件序列号
-    2. 已保存的兜底绑定键
-    3. 首次生成并保存的兜底绑定键
-
-  当前设备标识口径：
-    - device_fingerprint = 内部稳定绑定键
-    - device_id          = 用户自定义设备编号
+  当前设备绑定口径：
+    - 账号 + 项目 + 设备编号 是唯一绑定身份
+    - device_id          = 用户填写的设备编号，必填
     - connection_type    = usb / tcp / unknown
-    - connection_label   = USB 显示 SN；TCP 显示 IP:端口
+    - connection_label   = 连接辅助展示，不参与绑定
 改进内容:
-  V1.1.2 - 使用懒人精灵 getHardware() 获取硬件序列号
+  V1.1.2 - 仅使用账号 + 项目 + 设备编号
   V1.1.1 - 删除 WiFi MAC 回退，保持设备标识体系最小化
   V1.1.0 - 删除 IMSI 回退；登录与刷新补 device_id / connection 标识字段
   V1.0.2 - 加入硬件序列号作为首选指纹
@@ -35,61 +30,11 @@ local KEY_REFRESH_TOKEN = "hive_refresh_token"
 local KEY_USERNAME      = "hive_username"
 local KEY_PASSWORD      = "hive_password"
 local KEY_DEVICE_ID     = "hive_device_id"
-local KEY_FINGERPRINT   = "hive_device_fingerprint"
 
 local _access_token  = nil
 local _refresh_token = nil
-local _fingerprint   = nil
 local function _trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
-end
-
-local function _persist_fingerprint(value)
-    local fp = _trim(value)
-    if fp ~= "" then
-        writeKeyVal(KEY_FINGERPRINT, fp)
-    end
-    return fp
-end
-
-local function _read_hardware_serial()
-    local ok, hardware = pcall(function()
-        return getHardware()
-    end)
-    if ok then
-        return _trim(hardware)
-    end
-    return ""
-end
-
-function Verify.get_fingerprint()
-    if _fingerprint and _fingerprint ~= "" then
-        return _fingerprint
-    end
-
-    local hw_serial = _read_hardware_serial()
-    if hw_serial ~= "" then
-        _fingerprint = _persist_fingerprint(hw_serial)
-        Logger.debug("[Verify] 指纹来源: getHardware")
-        return _fingerprint
-    end
-
-    local saved = _trim(readKeyVal(KEY_FINGERPRINT))
-    if saved ~= "" then
-        _fingerprint = saved
-        Logger.warning("[Verify] 硬件序列号不可用，使用已保存的绑定键: " .. _fingerprint)
-        return _fingerprint
-    end
-
-    -- fallback must be persisted, otherwise each login may create a new binding key.
-    local entropy = tostring({}):gsub("[^0-9A-Fa-f]", "")
-    if entropy == "" then
-        entropy = tostring(math.random(100000, 999999))
-    end
-    local new_fb = string.format("fb_%d_%s", os.time(), entropy)
-    _fingerprint = _persist_fingerprint(new_fb)
-    Logger.warning("[Verify] 无法获取设备唯一标识，已生成并保存兜底绑定键: " .. _fingerprint)
-    return _fingerprint
 end
 
 function Verify.get_device_id()
@@ -102,11 +47,6 @@ function Verify.set_device_id(device_id)
 end
 
 function Verify.get_connection_info()
-    local hardware = _read_hardware_serial()
-    if hardware ~= "" then
-        return "usb", "SN:" .. hardware
-    end
-
     local lan_ip = tostring(readKeyVal("hive_lan_ip") or ""):match("^%s*(.-)%s*$")
     if lan_ip ~= "" then
         return "tcp", string.format("%s:%d", lan_ip, Config.LAN_PORT)
@@ -132,7 +72,8 @@ end
 local function _post_auth(path, body_table)
     local url    = Config.API_BASE_URL .. path
     local body   = jsonLib.encode(body_table)
-    local header = "Content-Type: application/json\r\nAuthorization: Bearer " .. (_access_token or "")
+    -- httpPost rejects CRLF-joined headers; LF keeps JSON content type and token.
+    local header = "Content-Type: application/json\nAuthorization: Bearer " .. (_access_token or "")
     local ret, code = httpPost(url, body, 30, header)
     if not ret or ret == "" then
         Logger.error("[Verify] POST_AUTH 无响应: " .. path)
@@ -154,27 +95,26 @@ local function _load_tokens()
 end
 
 function Verify.login(username, password, device_id)
-    local fp = Verify.get_fingerprint()
     local custom_device_id = tostring(device_id or Verify.get_device_id() or ""):match("^%s*(.-)%s*$")
+    if custom_device_id == "" then
+        return false, "设备编号不能为空"
+    end
     local connection_type, connection_label = Verify.get_connection_info()
     Verify.set_device_id(custom_device_id)
     writeKeyVal(KEY_USERNAME, username or "")
-    writeKeyVal(KEY_PASSWORD, Crypto.encrypt(password or "", fp))
+    writeKeyVal(KEY_PASSWORD, Crypto.encrypt(password or ""))
 
-    Logger.info(string.format("[Verify] 登录 user=%s fp=%s device_id=%s", username, fp, custom_device_id))
+    Logger.info(string.format("[Verify] 登录 user=%s device_id=%s", username, custom_device_id))
 
     local payload = {
         username = username,
         password = password,
         project_uuid = Config.PROJECT_UUID,
-        device_fingerprint = fp,
+        device_id = custom_device_id,
         client_type = "android",
         connection_type = connection_type,
         connection_label = connection_label,
     }
-    if custom_device_id ~= "" then
-        payload.device_id = custom_device_id
-    end
 
     local resp = _post("/api/auth/login", payload)
     if not resp then return false, "网络请求失败" end
@@ -199,9 +139,14 @@ end
 function Verify.refresh_token()
     _load_tokens()
     if not _refresh_token or _refresh_token == "" then return false end
+    local device_id = Verify.get_device_id()
+    if device_id == "" then
+        Logger.warning("[Verify] Token 刷新失败：设备编号为空")
+        return false
+    end
     local resp = _post("/api/auth/refresh", {
         refresh_token = _refresh_token,
-        device_fingerprint = Verify.get_fingerprint(),
+        device_id = device_id,
         client_type = "android",
     })
     if not resp then return false end
@@ -224,12 +169,12 @@ function Verify.ensure_token()
     -- 读取时解密（兼容旧版明文存储）
     local p
     if Crypto.is_encrypted(p_enc) then
-        p = Crypto.decrypt(p_enc, Verify.get_fingerprint())
+        p = Crypto.decrypt(p_enc)
     else
         p = p_enc   -- 旧版明文兼容
     end
     if p == "" then return false end
-    local ok, _ = Verify.login(u, p)
+    local ok, _ = Verify.login(u, p, Verify.get_device_id())
     return ok
 end
 

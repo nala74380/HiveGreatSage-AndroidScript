@@ -25,6 +25,15 @@ local _game_data = {}
 function Heartbeat.set_status(s)    _status    = s or "idle" end
 function Heartbeat.set_game_data(d) _game_data = d or {}    end
 
+local function _short_text(value, max_len)
+    local text = tostring(value or "")
+    max_len = max_len or 300
+    if #text > max_len then
+        return string.sub(text, 1, max_len) .. "..."
+    end
+    return text
+end
+
 -- 发送单次心跳（带 pcall 保护，不会崩溃主线程）
 local function _beat()
     local token = Verify.get_token()
@@ -35,15 +44,15 @@ local function _beat()
 
     local connection_type, connection_label = Verify.get_connection_info()
     local device_id = Verify.get_device_id()
+    if not device_id or device_id == "" then
+        Logger.warning("[Heartbeat] 设备编号为空，跳过上报")
+        return
+    end
     local payload = {
-        device_fingerprint = Verify.get_fingerprint(),
+        device_id          = device_id,
         status             = _status,
         game_data          = _game_data,
     }
-    -- Optional fields must be omitted when empty; backend rejects empty string by schema.
-    if device_id and device_id ~= "" then
-        payload.device_id = device_id
-    end
     if connection_type and connection_type ~= "" then
         payload.connection_type = connection_type
     end
@@ -57,7 +66,8 @@ local function _beat()
     end
 
     local url    = Config.API_BASE_URL .. "/api/device/heartbeat"
-    local header = "Content-Type: application/json\r\nAuthorization: Bearer " .. token
+    -- httpPost rejects CRLF-joined headers; use LF to keep JSON content type and token.
+    local header = "Content-Type: application/json\nAuthorization: Bearer " .. token
 
     local ok_req, ret, code = pcall(httpPost, url, body, 15, header)
     if not ok_req then
@@ -75,7 +85,12 @@ local function _beat()
     elseif c == "200" then
         Logger.debug("[Heartbeat] 上报成功 status=" .. _status)
     else
-        Logger.warning("[Heartbeat] 上报失败 code=" .. c)
+        Logger.warning("[Heartbeat] 上报失败 code=" .. c .. " body=" .. _short_text(ret))
+        Logger.debug(
+            "[Heartbeat] 失败请求摘要 device_id=" .. tostring(payload.device_id or "") ..
+            " connection_type=" .. tostring(payload.connection_type or "") ..
+            " status=" .. tostring(payload.status or "")
+        )
     end
 end
 

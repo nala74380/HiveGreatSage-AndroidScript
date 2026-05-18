@@ -39,14 +39,14 @@ function _ws_on_opened(handle)
     Logger.info("[CommLan] 已连接，发送 auth")
     local lan_device_id = Verify.get_device_id()
     if lan_device_id == "" then
-        lan_device_id = Verify.get_fingerprint()
+        Logger.error("[CommLan] 设备编号为空，无法发送 auth")
+        return
     end
     local connection_type, connection_label = Verify.get_connection_info()
     CommLan.send({
         type               = "auth",
         token              = Verify.get_token(),
         device_id          = lan_device_id,
-        device_fingerprint = Verify.get_fingerprint(),
         connection_type    = connection_type,
         connection_label   = connection_label,
         info               = { screen_size = string.format("%d×%d", Config.BASE_WIDTH, Config.BASE_HEIGHT) },

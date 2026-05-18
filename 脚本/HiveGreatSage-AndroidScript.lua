@@ -97,6 +97,12 @@ if username == "" or password == "" then
     return
 end
 
+if device_id == "" then
+    toast("设备编号不能为空")
+    exitScript()
+    return
+end
+
 -- Step 3：分辨率适配
 Logger.info("[main] Step3 分辨率适配")
 Screen.init()

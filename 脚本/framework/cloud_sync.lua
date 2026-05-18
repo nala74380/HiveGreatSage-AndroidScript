@@ -31,7 +31,8 @@ end
 local function _post_auth(path, body_table)
     local url    = Config.API_BASE_URL .. path
     local body   = jsonLib.encode(body_table)
-    local header = "Content-Type: application/json\r\nAuthorization: Bearer " .. Verify.get_token()
+    -- httpPost rejects CRLF-joined headers; LF keeps JSON content type and token.
+    local header = "Content-Type: application/json\nAuthorization: Bearer " .. Verify.get_token()
     local ret, code = httpPost(url, body, 30, header)
     if not ret or ret == "" then
         Logger.error("[CloudSync] POST 失败 " .. path .. " code=" .. tostring(code))

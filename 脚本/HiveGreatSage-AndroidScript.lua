@@ -103,11 +103,11 @@ if device_id == "" then
     return
 end
 
--- Step 3：分辨率适配
+-- Step 3：分辨率适配（仅读取，不开启缩放）
 Logger.info("[main] Step3 分辨率适配")
 Screen.init()
 
--- Step 5：代理/VPN
+-- Step 5：代理/VPN（此时仍为竖屏，使用实际坐标操作）
 Logger.info("[main] Step5 代理")
 Proxy.start()
 
@@ -164,6 +164,10 @@ if do_delay then
     Logger.info(string.format("[main] 游戏前随机延时 %ds...", delay))
     sleep(delay * 1000)
 end
+
+-- Step 14.5：开启图像缩放（进入游戏前，此时应已切换到横屏）
+Logger.info("[main] Step14.5 开启图像缩放")
+Screen.enable_scale()
 
 -- Step 15：调度器 + 游戏主逻辑
 Scheduler.run()

@@ -2,9 +2,10 @@
 文件位置: 脚本/framework/heartbeat.lua
 名称: 云端心跳模块
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-28
-版本: V1.0.3
+时间: 2026-05-22
+版本: V1.0.4
 改进内容:
+  V1.0.4 - 增强 Token 刷新失败处理：连续失败3次触发致命错误，避免设备长期无法上报
   V1.0.3 - 改用 beginThread 独立线程循环，解决 setTimer 被主线程 sleep() 阻塞的问题
            主线程 while true do sleep() end 会阻塞 setTimer 回调，心跳永远不触发
   V1.0.2 - 修正 httpPost 参数顺序和 header 格式
@@ -21,6 +22,8 @@ local Heartbeat = {}
 local _running   = false
 local _status    = "idle"
 local _game_data = {}
+local _refresh_fail_count = 0
+local MAX_REFRESH_FAILS = 3
 
 function Heartbeat.set_status(s)    _status    = s or "idle" end
 function Heartbeat.set_game_data(d) _game_data = d or {}    end
@@ -80,9 +83,22 @@ local function _beat()
         Logger.info("[Heartbeat] Token 过期，尝试刷新")
         local renewed = Verify.ensure_token()
         if not renewed then
-            Logger.warning("[Heartbeat] Token 刷新失败，下次重试")
+            _refresh_fail_count = _refresh_fail_count + 1
+            Logger.warning(string.format(
+                "[Heartbeat] Token 刷新失败 (%d/%d)，下次重试",
+                _refresh_fail_count, MAX_REFRESH_FAILS
+            ))
+            if _refresh_fail_count >= MAX_REFRESH_FAILS then
+                Logger.error("[Heartbeat] Token 连续刷新失败，触发致命错误")
+                local ErrorHandler = require("framework/error_handler")
+                ErrorHandler.handle("fatal", "Token 刷新连续失败")
+            end
+        else
+            _refresh_fail_count = 0  -- 刷新成功，重置计数
+            Logger.info("[Heartbeat] Token 刷新成功")
         end
     elseif c == "200" then
+        _refresh_fail_count = 0  -- 心跳成功，重置计数
         Logger.debug("[Heartbeat] 上报成功 status=" .. _status)
     else
         Logger.warning("[Heartbeat] 上报失败 code=" .. c .. " body=" .. _short_text(ret))

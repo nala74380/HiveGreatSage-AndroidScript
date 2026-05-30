@@ -2,15 +2,21 @@
 文件位置: 脚本/framework/verify.lua
 名称: 登录验证模块
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-18
-版本: V1.1.1
+时间: 2026-05-22
+版本: V1.1.4
 功能及相关说明:
   当前设备绑定口径：
     - 账号 + 项目 + 设备编号 是唯一绑定身份
     - device_id          = 用户填写的设备编号，必填
     - connection_type    = usb / tcp / unknown
     - connection_label   = 连接辅助展示，不参与绑定
+  密码存储策略：
+    - 使用device_id作为密钥进行加密存储
+    - 用于7×24小时自动重启后自动登录
+    - 如果device_id变化，密码解密会失败，需要用户重新登录
 改进内容:
+  V1.1.4 - 恢复密码加密存储功能，支持7×24小时自动重启后自动登录
+  V1.1.3 - 安全加固：移除密码持久化，仅持久化 refresh_token，避免弱加密风险（已回滚）
   V1.1.2 - 仅使用账号 + 项目 + 设备编号
   V1.1.1 - 删除 WiFi MAC 回退，保持设备标识体系最小化
   V1.1.0 - 删除 IMSI 回退；登录与刷新补 device_id / connection 标识字段
@@ -28,7 +34,7 @@ local Verify = {}
 local KEY_ACCESS_TOKEN  = "hive_access_token"
 local KEY_REFRESH_TOKEN = "hive_refresh_token"
 local KEY_USERNAME      = "hive_username"
-local KEY_PASSWORD      = "hive_password"
+local KEY_PASSWORD      = "hive_password"  -- 加密存储，用于7×24小时自动重启后自动登录
 local KEY_DEVICE_ID     = "hive_device_id"
 
 local _access_token  = nil
@@ -102,7 +108,10 @@ function Verify.login(username, password, device_id)
     local connection_type, connection_label = Verify.get_connection_info()
     Verify.set_device_id(custom_device_id)
     writeKeyVal(KEY_USERNAME, username or "")
-    writeKeyVal(KEY_PASSWORD, Crypto.encrypt(password or ""))
+
+    -- 密码加密存储（使用device_id作为密钥），用于7×24小时自动重启后自动登录
+    local encrypted_pwd = Crypto.encrypt(password, custom_device_id)
+    writeKeyVal(KEY_PASSWORD, encrypted_pwd)
 
     Logger.info(string.format("[Verify] 登录 user=%s device_id=%s", username, custom_device_id))
 
@@ -162,20 +171,37 @@ function Verify.refresh_token()
 end
 
 function Verify.ensure_token()
+    -- 优先使用 refresh_token 刷新
     if Verify.refresh_token() then return true end
-    local u = readKeyVal(KEY_USERNAME) or ""
-    local p_enc = readKeyVal(KEY_PASSWORD) or ""
-    if u == "" or p_enc == "" then return false end
-    -- 读取时解密（兼容旧版明文存储）
-    local p
-    if Crypto.is_encrypted(p_enc) then
-        p = Crypto.decrypt(p_enc)
-    else
-        p = p_enc   -- 旧版明文兼容
+
+    -- refresh_token 失效时，尝试从本地读取加密密码重新登录
+    Logger.info("[Verify] refresh_token 失效，尝试从本地读取密码重新登录")
+
+    local username = readKeyVal(KEY_USERNAME) or ""
+    local encrypted_pwd = readKeyVal(KEY_PASSWORD) or ""
+    local device_id = Verify.get_device_id()
+
+    if username == "" or encrypted_pwd == "" or device_id == "" then
+        Logger.warning("[Verify] 本地无有效凭证，需要用户重新登录")
+        return false
     end
-    if p == "" then return false end
-    local ok, _ = Verify.login(u, p, Verify.get_device_id())
-    return ok
+
+    -- 使用device_id解密密码
+    local password = Crypto.decrypt(encrypted_pwd, device_id)
+    if not password or password == "" then
+        Logger.error("[Verify] 密码解密失败（可能device_id已变化），需要用户重新登录")
+        return false
+    end
+
+    -- 尝试重新登录
+    local ok, err = Verify.login(username, password, device_id)
+    if not ok then
+        Logger.error("[Verify] 自动登录失败: " .. tostring(err))
+        return false
+    end
+
+    Logger.info("[Verify] 自动登录成功")
+    return true
 end
 
 function Verify.get_token()

@@ -2,13 +2,14 @@
 文件位置: 脚本/framework/crypto.lua
 名称: 简单加密工具
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-28
-版本: V1.0.0
+时间: 2026-05-22
+版本: V1.1.0
 功能及相关说明:
   用于本地 KV 存储中敏感字段（如密码）的简单可逆加密。
   算法：XOR + Base64，不是强加密，目的是防止明文直接被读取。
-  密钥使用脚本本地固定种子，不参与设备绑定。
+  支持使用自定义密钥（如device_id）增强安全性。
 改进内容:
+  V1.1.0 (2026-05-22) - 支持自定义密钥参数，增强加密强度
   V1.0.0 - 初始版本
 调试信息:
   已知问题: XOR + Base64 不能防止专业破解，仅用于本地存储防护
@@ -70,12 +71,14 @@ local function b64_decode(s)
     return table.concat(result)
 end
 
--- 从固定种子派生一个简单密钥（取前16字节）
+-- 从固定种子或自定义密钥派生密钥（取前16字节）
 local function _derive_key(seed)
     local key = {}
     local source = seed or "hive_local_kv_key"
+    -- 如果seed较短，循环填充到16字节
     for i = 1, 16 do
-        local c = source:sub(i, i)
+        local idx = ((i - 1) % #source) + 1
+        local c = source:sub(idx, idx)
         key[i] = c ~= "" and c:byte(1) or (i * 17)
     end
     return key
@@ -92,23 +95,25 @@ local function _xor_cipher(text, key)
 end
 
 -- ─────────────────────────────────────────────────────────────
--- Crypto.encrypt(plain) → encrypted_base64
+-- Crypto.encrypt(plain, custom_key) → encrypted_base64
+-- custom_key: 可选，自定义密钥（如device_id），增强安全性
 -- ─────────────────────────────────────────────────────────────
-function Crypto.encrypt(plain)
+function Crypto.encrypt(plain, custom_key)
     if not plain or plain == "" then return "" end
-    local key      = _derive_key()
+    local key      = _derive_key(custom_key)
     local xored    = _xor_cipher(plain, key)
     return b64_encode(xored)
 end
 
 -- ─────────────────────────────────────────────────────────────
--- Crypto.decrypt(encrypted_base64) → plain
+-- Crypto.decrypt(encrypted_base64, custom_key) → plain
+-- custom_key: 必须与加密时使用的密钥一致
 -- ─────────────────────────────────────────────────────────────
-function Crypto.decrypt(encrypted_b64)
+function Crypto.decrypt(encrypted_b64, custom_key)
     if not encrypted_b64 or encrypted_b64 == "" then return "" end
     local ok, xored = pcall(b64_decode, encrypted_b64)
     if not ok or xored == "" then return "" end
-    local key = _derive_key()
+    local key = _derive_key(custom_key)
     return _xor_cipher(xored, key)
 end
 

@@ -51,9 +51,25 @@ function UIHelper.show_startup_ui(is_first_login)
 
     _hive_build_ui()
 
-    -- 恢复配置（密码不持久化）
+    -- 恢复配置（包括密码）
     pcall(function() ui.loadProfile(_HIVE_CFG_PATH) end)
-    ui.setText("edit_password", "")
+
+    -- 重新设置标签文本（防止被loadProfile覆盖）
+    ui.setText("lbl_alias", "设备编号")
+
+    -- 从KV读取加密密码并解密后填充到UI
+    local Crypto = require("framework/crypto")
+    local Verify = require("framework/verify")
+    local stored_password = readKeyVal("hive_password") or ""
+    if stored_password ~= "" then
+        local device_id = Verify.get_device_id()
+        if device_id ~= "" then
+            local decrypted_pwd = Crypto.decrypt(stored_password, device_id)
+            if decrypted_pwd ~= "" then
+                ui.setText("edit_password", decrypted_pwd)
+            end
+        end
+    end
 
     ui.show(_HIVE_UI_NAME, false)
 
@@ -142,9 +158,11 @@ function _hive_build_ui()
     ui.newRow("tab_login", "row_l1")
     ui.addTextView("tab_login", "lbl_password", "密码")
     ui.addEditText("tab_login", "edit_password", "", -1)
+    -- 设置密码输入框为密文显示（128 = 密码类型）
+    ui.setInputType("edit_password", 128)
 
     ui.newRow("tab_login", "row_l2")
-    ui.addTextView("tab_login", "lbl_alias", "设备编号（必填）")
+    ui.addTextView("tab_login", "lbl_alias", "设备编号")
     ui.addEditText("tab_login", "edit_alias", readKeyVal("hive_device_id") or "", -1)
 
     ui.newRow("tab_login", "row_l3")
